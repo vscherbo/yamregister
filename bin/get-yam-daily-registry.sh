@@ -9,10 +9,13 @@ DO=''
 PG_SRV=vm-pg
 #############
 
+[ +$1 = +fetch ] && DO_FETCH='YES' || DO_FETCH='NO'
+
 #1. received email are processed by procmail and ripmime
 # result is the csv file in directory specified with .procmailrc 
 # i.e.  ripmime -i - -d /path/to/mailbox 
 CSV_DIR=`grep yamregister ~/.procmailrc | awk -F '-d' '{print $2}' | awk '{print $1}'`
+[ +$CSV_DIR = + ] && { echo CSV_DIR unassigned, exiting; exit 123; }
 LOG_DIR=$CSV_DIR/logs
 CSV_DATA=$CSV_DIR/01-data
 CSV_ARCH=$CSV_DIR/99-archive
@@ -29,26 +32,29 @@ find $LOG_DIR -type f -mtime +$ARCHIVE_DEPTH -delete # -exec rm -f {} \+
 LOG=$LOG_DIR/$DT-`namename $0`.log
 exec 1>>$LOG 2>&1
 
-#1. get email with register in the body - after 05:00
-#
-#$DO fetchmail -f $CSV_DIR/.fetchmailrc -ak -m "/usr/bin/procmail -d %T"
-$DO fetchmail -f $CSV_DIR/.fetchmailrc -k -m "/usr/bin/procmail -d %T"
 
-RC=$?
-case $RC in
-   0) logmsg INFO "One or more messages were successfully retrieved." 
-      ;;
-   1) logmsg INFO "There was no mail."
-      exit 0
-      ;;
-   *) logmsg $RC "fetchmail completed."
-      exit $RC
-      ;;
-esac
+if [ $DO_FETCH = 'YES' ]
+then
+    #1. get email with register in the body - after 05:00
+    #
+    #$DO fetchmail -f $CSV_DIR/.fetchmailrc -ak -m "/usr/bin/procmail -d %T"
+    $DO fetchmail -f $CSV_DIR/.fetchmailrc -k -m "/usr/bin/procmail -d %T"
 
-rm -f $CSV_DIR/smime*.p7s
-find $CSV_DIR -type f -name 'yamregister*' -size 0c -delete
+    RC=$?
+    case $RC in
+       0) logmsg INFO "One or more messages were successfully retrieved." 
+          ;;
+       1) logmsg INFO "There was no mail."
+          exit 0
+          ;;
+       *) logmsg $RC "fetchmail completed."
+          exit $RC
+          ;;
+    esac
 
+    rm -f $CSV_DIR/smime*.p7s
+    find $CSV_DIR -type f -name 'yamregister*' -size 0c -delete
+fi # DO_FETCH
 
 PG_COPY_SCRIPT=$CSV_DATA/pg-COPY-registry-$DT.sql
 
@@ -56,6 +62,7 @@ pushd $CSV_DIR
 
 > $PG_COPY_SCRIPT
 IMPORT='NO'
+IMPORT_PAYMENT='NO'
 IFS_BCK=$IFS
 IFS=$'\n'
 #3. Prepare COPY commands for PG
@@ -72,7 +79,6 @@ do
   if [ $ROWS -gt 0 ]
   then 
      logmsg INFO "TXT file $txt contains $ROWS rows. Prepare \\COPY command to load CSV into PG"
-     set -vx
      # reg_no=`awk -F'№ ' '/РЕЕСТР ПЛАТЕЖЕЙ В ООО "АРКОМ". №/ {print $2}' $txt`
      reg_date=`awk -F': ' '/Дата платежей:/ {print $2}' $txt`
 IFS=. read loc_day loc_mon loc_year <<EODATE
@@ -86,13 +92,28 @@ EODATE
 
      echo "\COPY yamregister FROM '"$PG_CSV"' WITH ( FORMAT CSV, HEADER false, DELIMITER ';') ;" >> $PG_COPY_SCRIPT
      IMPORT='YES'
-     set +vx
+  elif $(grep -q 'Извещение №' $txt)
+  then
+     # $DO mv $txt $CSV_DATA/$DT-yampayment-`namename $txt`
+     IMPORT_PAYMENT=$CSV_DATA/${DT}-yampayments.csv
+     # awk -F':' 'BEGIN { PROCINFO["sorted_in"] = "@ind_num_asc"}
+     # awk -F':' '/Извещение № / {split($0, arr, "№"); printf "%s;",arr[2]}; /Время платежа:/ {printf "%s;",$2}; /Сумма:/ {printf "%s;",$2}; /Номер транзакции:/ {printf "%s;",$2}; /Идентификатор клиента:/ {printf "%s;",$2}; /Номер в магазине:/ {printf "%s",$2};' $txt >> $IMPORT_PAYMENT
+     awk '/Извещение № / {split($0, arr, "№ "); printf "%s;",arr[2]};\
+    /Время платежа: / {gsub(/Время платежа: /, ""); printf "%s;",$0};\
+    /Сумма: / {printf "%s;", gensub(/Сумма: (.*) RUB/, "\\1", "g")};\
+    /Номер транзакции: / {gsub(/Номер транзакции: /, ""); printf "%s;",$0};\
+    /Идентификатор клиента: / {gsub(/Идентификатор клиента: /, ""); printf "%s;",$0};\
+    /Номер в магазине: / {gsub(/Номер в магазине: /, ""); printf "%s;\n",$0}' \
+      $txt >> $IMPORT_PAYMENT
+     THIS_PAY_DT=`date +%F_%H_%M_%S`
+     mv $txt $CSV_ARCH/$THIS_PAY_DT-`namename $txt`
   else
-     logmsg INFO "The registry $txt does not contain data row. Skip it, just archive"
+     arch_name=$DT-`namename $txt`
+     logmsg INFO "The registry $txt does not contain data row. Skip it, just archive as $arch_name"
      #echo '====================================='
      #cat $txt
      #echo '====================================='
-     $DO mv $txt $CSV_ARCH/$DT-`namename $txt`
+     $DO mv $txt $CSV_ARCH/$arch_name
   fi
 done
 IFS=$IFS_BCK
@@ -144,6 +165,23 @@ then
 else
    rm -f $PG_COPY_SCRIPT
 fi # if IMPORT
+
+
+#5. Import payment into PG
+# use ~/.pgpass
+if [ $IMPORT_PAYMENT != 'NO' ] # csv filename
+then
+   logmsg INFO "Import payments from $IMPORT_PAYMENT into $PG_SRV"
+   cat $IMPORT_PAYMENT
+   echo ""
+   # psql -h vm-pg-devel -U arc_energo -c '\COPY yampayment FROM  ''/smb/system/Scripts/yamregister/devel/01-data/2017-05-31_18_14_58-yampayments.csv'' WITH (FORMAT CSV, DELIMITER ";", HEADER false);'
+   $DO psql -h $PG_SRV -U arc_energo -d arc_energo -c '\COPY yampayment FROM  '$IMPORT_PAYMENT' WITH (FORMAT CSV, DELIMITER ";", HEADER false);'
+   $DO mv $IMPORT_PAYMENT $CSV_ARCH/
+
+fi
+
+# clean logs without mail
+grep -l 'There was no mail' $LOG_DIR/* |xargs rm
 
 popd
 
