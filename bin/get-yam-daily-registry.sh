@@ -152,7 +152,7 @@ then
          cat sql.file
          $DO psql -h $PG_SRV -U arc_energo -d arc_energo -w -f sql.file
          rm -f sql.file
-      fi
+      fi # ORDER_SET
 
       logmsg INFO "Try UPDATE Счета table"
       $DO psql -h $PG_SRV -U arc_energo -d arc_energo -w -c "UPDATE Счета SET inetamount = yamregister.net_amount, Сообщение = 't', inetdt = yamregister.payment_ts, ps_id = 3 FROM yamregister WHERE ИнтернетЗаказ = yamregister.order_id AND Интернет = 't' AND Оплачен = 'f' AND inetamount IS NULL;" 
