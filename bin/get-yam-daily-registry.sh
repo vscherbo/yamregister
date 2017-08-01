@@ -72,6 +72,7 @@ pushd $CSV_DIR
 > $PG_COPY_SCRIPT
 IMPORT='NO'
 IMPORT_PAYMENT='NO'
+IMPORT_ITEM='NO'
 IFS_BCK=$IFS
 IFS=$'\n'
 #3. Prepare COPY commands for PG
@@ -104,17 +105,10 @@ EODATE
      IMPORT='YES'
   elif $(grep -q 'Извещение №' $txt)
   then
-     # $DO mv $txt $CSV_DATA/$DT-yampayment-`namename $txt`
      IMPORT_PAYMENT=$CSV_DATA/${DT}-yampayments.csv
-     # awk -F':' 'BEGIN { PROCINFO["sorted_in"] = "@ind_num_asc"}
-     # awk -F':' '/Извещение № / {split($0, arr, "№"); printf "%s;",arr[2]}; /Время платежа:/ {printf "%s;",$2}; /Сумма:/ {printf "%s;",$2}; /Номер транзакции:/ {printf "%s;",$2}; /Идентификатор клиента:/ {printf "%s;",$2}; /Номер в магазине:/ {printf "%s",$2};' $txt >> $IMPORT_PAYMENT
-     awk '/Извещение № / {split($0, arr, "№ "); printf "%s;",arr[2]};\
-    /Время платежа: / {gsub(/Время платежа: /, ""); printf "%s;",$0};\
-    /Сумма: / {printf "%s;", gensub(/Сумма: (.*) RUB/, "\\1", "g")};\
-    /Номер транзакции: / {gsub(/Номер транзакции: /, ""); printf "%s;",$0};\
-    /Идентификатор клиента: / {gsub(/Идентификатор клиента: /, ""); printf "%s;",$0};\
-    /Номер в магазине: / {gsub(/Номер в магазине: /, ""); printf "%s;\n",$0}' \
-      $txt >> $IMPORT_PAYMENT
+     IMPORT_ITEM=$CSV_DATA/${DT}-yam_item.csv
+     $CSV_DIR/bin/yampayment-parser.py --yampayment_txt $txt --yampayment_csv $IMPORT_PAYMENT --yam_item_csv $IMPORT_ITEM
+
      THIS_PAY_DT=`date +%F_%H_%M_%S`
      mv $txt $CSV_ARCH/$THIS_PAY_DT-`namename $txt`
   else
@@ -184,10 +178,20 @@ then
    logmsg INFO "Import payments from $IMPORT_PAYMENT into $PG_SRV"
    cat $IMPORT_PAYMENT
    echo ""
-   # psql -h vm-pg-devel -U arc_energo -c '\COPY yampayment FROM  ''/smb/system/Scripts/yamregister/devel/01-data/2017-05-31_18_14_58-yampayments.csv'' WITH (FORMAT CSV, DELIMITER ";", HEADER false);'
-   $DO psql -h $PG_SRV -U arc_energo -d arc_energo -c '\COPY yampayment FROM  '$IMPORT_PAYMENT' WITH (FORMAT CSV, DELIMITER ";", HEADER false);'
+   # psql -h vm-pg-devel -U arc_energo -c '\COPY yampayment FROM ''/smb/system/Scripts/yamregister/devel/01-data/2017-05-31_18_14_58-yampayments.csv'' WITH (FORMAT CSV, DELIMITER ";", HEADER false);'
+   $DO psql -h $PG_SRV -U arc_energo -d arc_energo -c '\COPY yampayment FROM '$IMPORT_PAYMENT' WITH (FORMAT CSV, DELIMITER "^", HEADER false);'
    $DO mv $IMPORT_PAYMENT $CSV_ARCH/
+fi
 
+#6. Import items into PG
+# use ~/.pgpass
+if [ $IMPORT_ITEM != 'NO' ] # csv filename
+then
+   logmsg INFO "Import items from $IMPORT_ITEM into $PG_SRV"
+   cat $IMPORT_ITEM
+   echo ""
+   $DO psql -h $PG_SRV -U arc_energo -d arc_energo -c '\COPY yam_item(yam_id, item_name) FROM '$IMPORT_ITEM' WITH (FORMAT CSV, DELIMITER "^", HEADER false);'
+   $DO mv $IMPORT_ITEM $CSV_ARCH/
 fi
 
 /usr/sbin/logrotate --state get-yam-daily-registry.state get-yam-daily-registry.conf
