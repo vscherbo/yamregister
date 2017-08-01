@@ -10,6 +10,6 @@ declare
 begin
     -- EXCEPTION
     new.order_id := regexp_replace(new.order_uid, '.* #', '', 'g')::integer;
-    raise notice 'id=%', new.order_id;
+    -- raise notice 'id=%', new.order_id;
     return new;
 end $$
