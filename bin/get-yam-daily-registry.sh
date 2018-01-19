@@ -190,7 +190,7 @@ then
    logmsg INFO "Import items from $IMPORT_ITEM into $PG_SRV"
    cat $IMPORT_ITEM
    echo ""
-   $DO psql -h $PG_SRV -U arc_energo -d arc_energo -c '\COPY yam_item(yam_id, item_name) FROM '$IMPORT_ITEM' WITH (FORMAT CSV, DELIMITER "^", HEADER false);'
+   $DO psql -h $PG_SRV -U arc_energo -d arc_energo -c '\COPY yam_item(yam_id, item_name, item_qnt, item_price) FROM '$IMPORT_ITEM' WITH (FORMAT CSV, DELIMITER "^", HEADER false);'
    $DO mv $IMPORT_ITEM $CSV_ARCH/
 fi
 
