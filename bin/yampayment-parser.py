@@ -44,8 +44,10 @@ for line in yamreg:
         payment.append(gre.last_match.group(1))
     elif gre.match(r'Номер в магазине: (.*)$', line):
         payment.append(gre.last_match.group(1))
-    elif gre.match(r'(.*) (.*)\*(.*) руб\.$', line):
-        items.append(u"{0}^{1}".format(tran_num, gre.last_match.group(1).decode('utf-8').strip() ))
+    elif gre.match(r'(.*) (.*)\*(.*) руб\.', line):
+        items.append(u"{0}^{1}^{2}^{3}".format(tran_num, gre.last_match.group(1).decode('utf-8').strip(),
+                                                 gre.last_match.group(2).decode('utf-8').strip(), # шт
+                                                 gre.last_match.group(3).decode('utf-8').strip()) ) # руб
     else:
         # do something else
         # print line
