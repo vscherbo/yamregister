@@ -6,14 +6,14 @@ import argparse
 import codecs
 
 class Re(object):
-  def __init__(self):
-    self.last_match = None
-  def match(self,pattern,text):
-    self.last_match = re.match(pattern,text)
-    return self.last_match
-  def search(self,pattern,text):
-    self.last_match = re.search(pattern,text)
-    return self.last_match
+    def __init__(self):
+        self.last_match = None
+    def match(self, pattern, text):
+        self.last_match = re.match(pattern, text)
+        return self.last_match
+    def search(self, pattern, text):
+        self.last_match = re.search(pattern, text)
+        return self.last_match
 
 parser = argparse.ArgumentParser(description='YAmoney parser.')
 parser.add_argument('--yampayment_txt', type=str, help='in: yampayment saved e-mail')
@@ -45,7 +45,7 @@ for line in yamreg:
     elif gre.match(r'Номер в магазине: (.*)$', line):
         payment.append(gre.last_match.group(1))
     elif gre.match(r'(.*) (.*)\*(.*) руб\.', line):
-        items.append(u"{0}^{1}^{2}^{3}".format(tran_num, gre.last_match.group(1).decode('utf-8').strip(),
+        items.append(u"{0}^{1}^{2}^{3}".format(tran_num, gre.last_match.group(1).decode('utf-8').strip().replace('\\"', '""""'),
                                                  gre.last_match.group(2).decode('utf-8').strip(), # шт
                                                  gre.last_match.group(3).decode('utf-8').strip()) ) # руб
     else:
@@ -63,4 +63,3 @@ str_items = u"\n".join(items) + "\n"
 #print str_items
 f_item.write(str_items)
 f_item.close()
-
