@@ -11,6 +11,7 @@ DIR_NAME=$(dirname "$0")
 if [[ "$DIR_NAME" =~ .*devel.* ]]
 then
     PG_SRV=vm-pg-devel.arc.world
+    FM_RC=~/.fetchmailrc
 fi 
 #############
 
@@ -43,7 +44,12 @@ then
     #1. get email with register in the body - after 05:00
     #
     #$DO fetchmail -f $CSV_DIR/.fetchmailrc -ak -m "/usr/bin/procmail -d %T"
-    $DO fetchmail -f "$CSV_DIR"/.fetchmailrc -k -m "/usr/bin/procmail -d %T"
+    if [ ! $FM_RC ]
+    then
+        FM_RC="$CSV_DIR"/.fetchmailrc
+    fi
+    #$DO fetchmail -f "$CSV_DIR"/.fetchmailrc -k -m "/usr/bin/procmail -d %T"
+    $DO fetchmail -f "$FM_RC" -k -m "/usr/bin/procmail -d %T"
 
     RC=$?
     case $RC in
@@ -71,12 +77,12 @@ then
 fi # DO_FETCH
 
 PG_COPY_SCRIPT=$CSV_DATA/pg-COPY-registry-$DT.sql
-PG_COPY_RETURN_SCRIPT=$CSV_DATA/pg-COPY-RETURN-registry-$DT.sql
+PG_COPY_REFUND_SCRIPT=$CSV_DATA/pg-COPY-REFUND-registry-$DT.sql
 
 pushd "$CSV_DIR"
 
 > "$PG_COPY_SCRIPT"
-> "$PG_COPY_RETURN_SCRIPT"
+> "$PG_COPY_REFUND_SCRIPT"
 IMPORT='NO'
 IMPORT_PAYMENT='NO'
 IMPORT_ITEM='NO'
@@ -89,15 +95,19 @@ for csv1251 in $REGS_LIST
 do
   fname=$(echo "${csv1251}" |sed 's/^-*/_/g')
   txt=$CSV_DATA/${fname}.txt
-  #txt=$CSV_DATA/${csv1251}.txt
-  iconv -f cp1251 -t utf8 -- "$csv1251" |dos2unix > "$txt"
-  ## cp $csv1251 $txt
+  if [[ "$(file "${csv1251}")" =~ .*UTF-8.* ]]
+  then
+      cp "${csv1251}" "$txt"
+  else
+      iconv -f cp1251 -t utf8 -- "$csv1251" |dos2unix > "$txt"
+  fi
   rm -f -- "$csv1251"
+
   # import files containing not only header 
   # input file doesn't contain CR on the last line. Use grep -c
   ROWS=$(grep -c ' kipspb.ru;' "$txt")
-  RETURN=$(grep -c 'РЕЕСТР ВОЗВРАТОВ' "$txt")
-  if [ "$ROWS" -gt 0 ] || [ "$RETURN" -gt 0 ]
+  REFUNDS=$(grep -c 'REF' "$txt")
+  if [ "$ROWS" -gt 0 ] || [ "$REFUNDS" -gt 0 ]
   then 
      # reg_no=`awk -F'№ ' '/РЕЕСТР ПЛАТЕЖЕЙ В ООО "АРКОМ". №/ {print $2}' $txt`
      reg_date=$(awk -F': ' '/Дата (платежей|возвратов):/ {print $2}' "$txt")
@@ -114,14 +124,14 @@ EODATE
         echo "\COPY yamregister FROM '"$PG_CSV"' WITH ( FORMAT CSV, HEADER false, DELIMITER ';') ;" >> "$PG_COPY_SCRIPT"
         mv "$txt" "$CSV_DATA"/"$PAY_DT"-"$(namename "$txt")"
         IMPORT='YES'
-     elif [ "$RETURN" -gt 0 ]
+     elif [ "$REFUNDS" -gt 0 ]
      then
         PG_CSV_RET=$CSV_DATA/$csv_name-returns.csv
-        logmsg INFO "TXT file $txt contains RETURNS rows. Prepare \\COPY command to load CSV into PG"
+        logmsg INFO "TXT file $txt contains REFUNDS rows. Prepare \\COPY command to load CSV into PG"
         awk '/REF/ {N=split($0,arr,";"); for (i=1;i<=11;i++) printf "%s;", arr[i]; print ";"}' "$txt" |sed -e 's/; /;/g' -e "s/;$/$reg_date/" > "$PG_CSV_RET"
-        echo "\COPY yamreturn FROM '"$PG_CSV_RET"' WITH ( FORMAT CSV, HEADER false, DELIMITER ';') ;" >> "$PG_COPY_RETURN_SCRIPT"
+        echo "\COPY yamrefund FROM '"$PG_CSV_RET"' WITH ( FORMAT CSV, HEADER false, DELIMITER ';') ;" >> "$PG_COPY_REFUND_SCRIPT"
         mv "$txt" "$CSV_DATA"/"$PAY_DT"-"$(namename "$txt")"-returns
-        IMPORT='RETURN'
+        IMPORT='REFUND'
      fi
 
   elif $(grep -q 'Извещение №' $txt)
@@ -200,18 +210,18 @@ then
       $DO mv $CSV_DATA/*yamregister* $CSV_ARCH/
       $DO mv $PG_COPY_SCRIPT $CSV_ARCH/
    fi # if RC_IMP=0 
-elif [ $IMPORT == 'RETURN' ]
+elif [ $IMPORT == 'REFUND' ]
 then
    logmsg INFO "\\COPY $PG_CSV_RET into $PG_SRV"
    cat $PG_CSV_RET
    echo ""
 
-   $DO psql --set ON_ERROR_STOP=on -h $PG_SRV -U arc_energo -d arc_energo -w -f $PG_COPY_RETURN_SCRIPT
+   $DO psql --set ON_ERROR_STOP=on -h $PG_SRV -U arc_energo -d arc_energo -w -f $PG_COPY_REFUND_SCRIPT
    RC_IMP=$?
-   logmsg $RC_IMP "The Yandex.money registry($PG_COPY_RETURN_SCRIPT) imported."
+   logmsg $RC_IMP "The Yandex.money registry($PG_COPY_REFUND_SCRIPT) imported."
 else
    rm -f $PG_COPY_SCRIPT
-   rm -f $PG_COPY_RETURN_SCRIPT
+   rm -f $PG_COPY_REFUND_SCRIPT
 fi # if IMPORT
 
 
