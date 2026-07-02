@@ -1,9 +1,15 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 import re
 import argparse
 import codecs
+
+def to_unicode(s):
+    """Возвращает юникод-строку для Python 2 и 3"""
+    if isinstance(s, bytes):
+        return s.decode('utf-8')
+    return s
 
 class Re(object):
     def __init__(self):
@@ -45,9 +51,10 @@ for line in yamreg:
     elif gre.match(r'Номер в магазине: (.*)$', line):
         payment.append(gre.last_match.group(1))
     elif gre.match(r'(.*) (.*)\*(.*) руб\.', line):
-        items.append(u"{0}^{1}^{2}^{3}".format(tran_num, gre.last_match.group(1).decode('utf-8').strip().replace('\\"', '""""'),
-                                                 gre.last_match.group(2).decode('utf-8').strip(), # шт
-                                                 gre.last_match.group(3).decode('utf-8').strip()) ) # руб
+        # items.append(u"{0}^{1}^{2}^{3}".format(tran_num, gre.last_match.group(1).decode('utf-8').strip().replace('\\"', '""""'),
+        items.append(u"{0}^{1}^{2}^{3}".format(tran_num, to_unicode(gre.last_match.group(1)).strip().replace('\\"', '""""'),
+                                                 to_unicode(gre.last_match.group(2)).strip(), # шт
+                                                 to_unicode(gre.last_match.group(3)).strip()) ) # руб
     else:
         # do something else
         # print line
